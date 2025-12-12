@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Claim, DamageRegion } from '../types';
-import { MapPin, AlignLeft, Camera, Image, PenLine, Check, X, Shield, Car, Calendar, DollarSign, FileText, StickyNote, Focus } from 'lucide-react';
+import { MapPin, AlignLeft, Camera, Image, PenLine, Check, X, Shield, Car, Calendar, DollarSign, FileText, StickyNote, Focus, Sparkles, Loader2 } from 'lucide-react';
+import { generateEvidenceImage } from '../services/geminiService';
+import { evidenceCache } from '../services/imageStore';
 
 export const FnolContextWidget: React.FC<{ claim: Claim; onUpdateClaim?: (updates: Partial<Claim>) => void }> = ({ claim, onUpdateClaim }) => {
   const [editingSection, setEditingSection] = useState<'none' | 'transcript' | 'notes'>('none');
@@ -288,6 +290,49 @@ export const LocationMapWidget: React.FC<{ claim: Claim }> = ({ claim }) => {
 }
 
 export const EvidenceGallery: React.FC<{ claim: Claim; focusedRegion?: DamageRegion | null }> = ({ claim, focusedRegion }) => {
+  const [evidenceImages, setEvidenceImages] = useState<string[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    const cachedEvidence = evidenceCache.get(claim.id);
+    if (cachedEvidence && cachedEvidence.length > 0) {
+        setEvidenceImages(cachedEvidence);
+    } else {
+        // Automatically start generation on mount if not in cache
+        handleGenerateEvidence();
+    }
+  }, [claim.id]);
+
+  const handleGenerateEvidence = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    setEvidenceImages([]);
+
+    const basePrompt = `Amateur smartphone photo of a ${claim.carDetails.year} ${claim.carDetails.color} ${claim.carDetails.make} ${claim.carDetails.model} at ${claim.location}. The car has ${claim.description}. Realistic lighting, raw, unedited, user uploaded photo style.`;
+
+    // Create 4 varied prompts for diversity
+    const prompts = [
+        `${basePrompt} Close up view of the specific damage area.`,
+        `${basePrompt} Wide angle shot showing the whole car and the environment.`,
+        `${basePrompt} Side angle view showing the impact.`,
+        `${basePrompt} View from a standing person's perspective looking down at the damage.`
+    ];
+
+    try {
+        const results = await Promise.all(prompts.map(p => generateEvidenceImage(p)));
+        const validResults = results.filter(res => res !== null) as string[];
+        
+        if (validResults.length > 0) {
+            setEvidenceImages(validResults);
+            evidenceCache.set(claim.id, validResults);
+        }
+    } catch (e) {
+        console.error("Failed to generate evidence", e);
+    } finally {
+        setIsGenerating(false);
+    }
+  };
+
   return (
     <div className={`bg-white rounded-3xl shadow-sm p-5 border transition-colors duration-300 h-full ${focusedRegion ? 'border-[#ff0083]/50 ring-4 ring-[#ff0083]/5' : 'border-slate-100'}`}>
       <div className="flex items-center justify-between mb-4">
@@ -302,30 +347,49 @@ export const EvidenceGallery: React.FC<{ claim: Claim; focusedRegion?: DamageReg
                 {focusedRegion && <span className="text-[10px] text-slate-400">Showing photos matching detected damage</span>}
             </div>
          </div>
-         <span className="bg-slate-50 border border-slate-100 text-slate-400 text-[10px] px-2 py-1 rounded-md font-bold font-mono">{claim.evidencePhotos.length} IMAGES</span>
+         <div className="flex items-center gap-2">
+             <button 
+                onClick={handleGenerateEvidence}
+                disabled={isGenerating}
+                className="flex items-center gap-1 bg-pink-50 hover:bg-pink-100 text-[#ff0083] text-[10px] px-2 py-1 rounded-md font-bold transition-colors disabled:opacity-50"
+             >
+                <Sparkles className="w-3 h-3" />
+                {isGenerating ? 'GENERATING...' : 'REGENERATE AI EVIDENCE'}
+             </button>
+             <span className="bg-slate-50 border border-slate-100 text-slate-400 text-[10px] px-2 py-1 rounded-md font-bold font-mono">
+                {evidenceImages.length} IMAGES
+             </span>
+         </div>
       </div>
       
       <div className="grid grid-cols-4 gap-4 h-32">
-         {claim.evidencePhotos.map((photo, i) => {
-             // Mock filtering logic: If focusedRegion exists, only show some photos (based on index) to simulate relevance
-             // In a real app, this would match image tags or embeddings
-             const isRelevant = !focusedRegion || (i % 2 === 0); 
-             
-             return (
-                 <div key={i} className={`h-full w-full rounded-2xl overflow-hidden relative group cursor-pointer border shadow-sm transition-all duration-300 ${isRelevant ? 'opacity-100 scale-100 border-slate-100' : 'opacity-30 scale-95 grayscale'}`}>
-                     <img src={photo} alt="evidence" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                     <div className="absolute inset-0 bg-[#ff0083]/0 group-hover:bg-[#ff0083]/10 transition-colors flex items-center justify-center">
-                        <Image className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
-                     </div>
-                     {focusedRegion && isRelevant && (
-                         <div className="absolute top-1 right-1 w-3 h-3 bg-[#ff0083] rounded-full border border-white shadow-sm"></div>
-                     )}
-                 </div>
-             )
-         })}
+         {isGenerating ? (
+            // Loading Skeletons
+            Array.from({ length: 4 }).map((_, i) => (
+                <div key={`loading-${i}`} className="h-full w-full rounded-2xl bg-slate-100 animate-pulse flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
+                </div>
+            ))
+         ) : (
+            evidenceImages.map((photo, i) => {
+                const isRelevant = !focusedRegion || (i % 2 === 0); 
+                
+                return (
+                    <div key={i} className={`h-full w-full rounded-2xl overflow-hidden relative group cursor-pointer border shadow-sm transition-all duration-300 ${isRelevant ? 'opacity-100 scale-100 border-slate-100' : 'opacity-30 scale-95 grayscale'}`}>
+                        <img src={photo} alt="evidence" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                        <div className="absolute inset-0 bg-[#ff0083]/0 group-hover:bg-[#ff0083]/10 transition-colors flex items-center justify-center">
+                            <Image className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                        </div>
+                        {focusedRegion && isRelevant && (
+                            <div className="absolute top-1 right-1 w-3 h-3 bg-[#ff0083] rounded-full border border-white shadow-sm"></div>
+                        )}
+                    </div>
+                )
+            })
+         )}
          
-         {/* Fallback empty slots for visual consistency if few photos */}
-         {Array.from({ length: Math.max(0, 4 - claim.evidencePhotos.length) }).map((_, i) => (
+         {/* Fallback empty slots for visual consistency if few photos or generation failed */}
+         {!isGenerating && Array.from({ length: Math.max(0, 4 - evidenceImages.length) }).map((_, i) => (
              <div key={`empty-${i}`} className="h-full w-full rounded-2xl bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center">
                 <div className="w-2 h-2 rounded-full bg-slate-200"></div>
              </div>

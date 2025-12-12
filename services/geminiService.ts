@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { DamageRegion } from "../types";
 
@@ -43,6 +44,38 @@ export const generateSceneImage = async (prompt: string): Promise<string | null>
 
   } catch (error) {
     console.error("Error generating scene image:", error);
+    return null;
+  }
+};
+
+/**
+ * Generates a realistic evidence photo (simulating user upload) using Gemini 2.5 Flash Image.
+ */
+export const generateEvidenceImage = async (prompt: string): Promise<string | null> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [{ text: prompt }],
+      },
+      // Note: gemini-2.5-flash-image does not support aspect ratio or size config in the same way as pro-image yet,
+      // and responseSchema/MimeType are not supported for this model.
+    });
+
+    if (response.candidates && response.candidates.length > 0) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          const base64EncodeString = part.inlineData.data;
+          const mimeType = part.inlineData.mimeType || 'image/png'; 
+          return `data:${mimeType};base64,${base64EncodeString}`;
+        }
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Error generating evidence image:", error);
     return null;
   }
 };
